@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8"/>
+<title>แดชบอร์ดโครงการ (Google Sheets)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  body { font-family: "Segoe UI", Tahoma, sans-serif; background: #f7fbff; padding: 20px; }
+  h1 { color: #0b3a80; margin: 0 0 12px 0; font-size: 22px; }
+  h2 { color: #0e4da4; margin: 12px 0 8px; font-size: 16px; }
+  .section { background: #fff; border: 1px solid #e3efff; border-radius: 12px; padding: 12px; margin-top: 12px; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  input[type="text"], select { padding: 8px; border-radius: 8px; border: 1px solid #c6dafc; }
+  .btn { background:#0b66ff; color:#fff; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .btn:hover { filter: brightness(.96); }
+  table { border-collapse: collapse; width: 100%; background: white; border-radius: 8px; overflow: hidden; }
+  th, td { padding: 10px; border-bottom: 1px solid #e3efff; font-size: 14px; }
+  th { background: #e8f2ff; color: #0b3a80; text-align:left; }
+  tr:hover { background-color: #f0f8ff; }
+  .th-right { text-align:right; }
+  .status-badge { display:inline-block; border-radius:8px; padding:4px 8px; font-weight:700; }
+  .bg-green { background:#3FBF7F; color:#073b2f; }    /* ผูก PO แล้ว */
+  .bg-orange { background:#FFA94D; color:#5a2d00; }   /* ทำสัญญาแล้ว / กำลังทำสัญญา */
+  .bg-default { background:#E8F2FF; color:#123d7e; }  /* อื่น ๆ */
+  .error { background:#fff1f0; color:#a8071a; border:1px solid #ffccc7; padding:8px 10px; border-radius:8px; margin-bottom:8px; display:none; }
+
+  .summary { display:flex; gap:12px; flex-wrap:wrap; }
+  .card { background:#f9fbff; border:1px solid #d7e6ff; border-radius:12px; padding:10px 12px; min-width:220px; }
+  .label { font-size:12px; color:#3b5aa8; }
+  .value { font-size:20px; font-weight:700; color:#0b3a80; }
+</style>
+</head>
+<body>
+  <h1>แดชบอร์ดโครงการ (ดึงจาก Google Sheets)</h1>
+
+  <div id="errBox" class="error">ไม่สามารถดึงข้อมูลได้</div>
+
+  <div class="section">
+    <div class="controls">
+      <label>หน่วยงาน:</label>
+      <select id="unitFilter"><option value="">ทุกหน่วยงาน</option></select>
+      <input type="text" id="searchInput" placeholder="🔍 ค้นหา โครงการ / แหล่งเงิน / หมายเหตุ ...">
+      <button class="btn" id="btnRefresh">รีเฟรชตอนนี้</button>
+      <span style="font-size:12px;color:#2b5ea8;">รีเฟรชอัตโนมัติทุก <span id="refreshSec">60</span> วินาที</span>
+    </div>
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>หน่วยงาน</th>
+          <th>รายการ (โครงการ)</th>
+          <th class="th-right">จำนวน</th>
+          <th>แหล่งเงิน</th>
+          <th>อยู่ในขั้นตอน</th>
+          <th>รายละเอียดอยู่ในขั้นตอน</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="summary">
+      <div class="card">
+        <div class="label">จำนวนโครงการที่แสดง</div>
+        <div class="value" id="sumCount">0</div>
+      </div>
+      <div class="card">
+        <div class="label">รวมจำนวนเงิน (ที่แสดงตอนนี้)</div>
+        <div class="value" id="sumAmount">0</div>
+      </div>
+    </div>
+    <h2 style="margin-top:10px;">แยกตามแหล่งเงิน (เฉพาะที่แสดงตอนนี้)</h2>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead><tr><th>แหล่งเงิน</th><th class="th-right">รวมเงิน</th></tr></thead>
+      <tbody id="fundBreakdown"></tbody>
+    </table>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" style="position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.35)">
+    <div style="background:white; width:min(640px,92vw); border-radius:12px; border:1px solid #e3efff;">
+      <div id="modalTitle" style="padding:12px 16px; border-bottom:1px solid #e9f1ff; font-weight:700; color:#0e4da4;">รายละเอียดอยู่ในขั้นตอน</div>
+      <div id="modalBody" style="padding:14px; color:#0f2b54; white-space:pre-wrap;">—</div>
+      <div style="padding:10px 16px; border-top:1px solid #e9f1ff; text-align:right;">
+        <button id="closeModal" class="btn">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ===== ตั้งค่า: ลิงก์ชีต + รอบรีเฟรช ===== */
+const GSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS9NHoIRNnKcsdn3IUyYtYc1SWc6zcLG3vjrct_TK71RMRfkS7HVng1C95IdxzLDA/pub?gid=476370469&single=true&output=csv";
+const REFRESH_SECONDS = 60;
+
+/* ===== Utilities ===== */
+function parseCSV(text) {
+  const rows = [];
+  let i=0, field="", row=[], inQuotes=false;
+  while (i<text.length) {
+    const c=text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i+1] === '"') { field+='"'; i++; } else { inQuotes=false; } }
+      else { field += c; }
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field=""; }
+      else if (c === '\n') { row.push(field); rows.push(row); row=[]; field=""; }
+      else if (c !== '\r') field += c;
+    }
+    i++;
+  }
+  row.push(field); rows.push(row);
+  while (rows.length && rows[rows.length-1].length===1 && rows[rows.length-1][0]==="") rows.pop();
+  return rows;
+}
+function norm(s){ return (s||"").toString().replace(/\s+/g,"").toLowerCase(); }
+function escapeHtml(s) { return (s||"").toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+function fmtAmount(x) { const n = Number((x||"").toString().replace(/,/g,"").trim()); return isNaN(n) ? "" : n.toLocaleString('th-TH', { maximumFractionDigits: 0 }); }
+function parseAmount(x){ const n = Number((x||"").toString().replace(/,/g,"").trim()); return isNaN(n) ? 0 : n; }
+function statusClass(s){ s=(s||"").trim(); if(s==="ผูก PO แล้ว") return "bg-green"; if(s==="ทำสัญญาแล้ว"||s==="กำลังทำสัญญา") return "bg-orange"; return "bg-default"; }
+
+/* ===== Header mapping แบบยืดหยุ่น ===== */
+function autoMap(headers){
+  function find(cands){
+    for (const c of cands){
+      const idx = headers.findIndex(h => norm(h)===norm(c));
+      if (idx>=0) return idx;
+    }
+    return -1;
+  }
+  return {
+    unit:   find(["หน่วยงาน","หน่วยงาน/ฝ่าย","ฝ่าย","ผู้รับผิดชอบ"]),
+    name:   find(["รายการ","โครงการ","รายการ(โครงการ)","ชื่อโครงการ"]),
+    amount: find(["จำนวน","จำนวนเงิน","วงเงิน","งบประมาณ","มูลค่า","จำนวนเงิน(บาท)","รวมเงิน"]),
+    fund:   find(["แหล่งเงิน","งบประมาณจาก","งบ","งบประมาณ/แหล่งเงิน"]),
+    status: find(["อยู่ในขั้นตอน","สถานะ","สรุปขั้นตอน","สถานะปัจจุบัน"]),
+    note:   find(["หมายเหตุ","รายละเอียดของสถานะ","รายละเอียด","บันทึก"])
+  };
+}
+
+/* ===== Global State ===== */
+let HEADER=[], ROWS=[], MAP=null;
+
+/* ===== Filtering/Rendering ===== */
+function fillUnitFilter() {
+  const sel = document.getElementById("unitFilter");
+  sel.innerHTML = '<option value="">ทุกหน่วยงาน</option>';
+  if (MAP.unit>=0) {
+    const units = Array.from(new Set(ROWS.map(r => r[MAP.unit]||"").filter(Boolean))).sort();
+    units.forEach(u => { const opt=document.createElement("option"); opt.value=u; opt.textContent=u; sel.appendChild(opt); });
+  }
+}
+
+function applyFilters() {
+  const unitSel = document.getElementById("unitFilter").value.trim().toLowerCase();
+  const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  return ROWS.filter(r => {
+    const unit = (MAP.unit>=0 ? (r[MAP.unit]||"") : "").toLowerCase();
+    const name = (MAP.name>=0 ? (r[MAP.name]||"") : "");
+    const fund = (MAP.fund>=0 ? (r[MAP.fund]||"") : "");
+    const status = (MAP.status>=0 ? (r[MAP.status]||"") : "");
+    const note = (MAP.note>=0 ? (r[MAP.note]||"") : "");
+    if (unitSel && unit !== unitSel) return false;
+    if (q) {
+      const hay = (unit + " " + name + " " + fund + " " + status + " " + note).toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+}
+
+function renderSummary(filtered){
+  let total=0;
+  filtered.forEach(r => { if (MAP.amount>=0) total += parseAmount(r[MAP.amount]); });
+  document.getElementById("sumCount").textContent = filtered.length;
+  document.getElementById("sumAmount").textContent = fmtAmount(total);
+
+  const body = document.getElementById("fundBreakdown");
+  body.innerHTML = "";
+  const acc = {};
+  filtered.forEach(r => {
+    const fund = (MAP.fund>=0 ? (r[MAP.fund]||"") : "ไม่ระบุ") || "ไม่ระบุ";
+    const amt = (MAP.amount>=0 ? parseAmount(r[MAP.amount]) : 0);
+    acc[fund] = (acc[fund]||0) + amt;
+  });
+  Object.keys(acc).sort((a,b)=>acc[b]-acc[a]).forEach(k => {
+    const tr=document.createElement("tr");
+    const td1=document.createElement("td"); td1.textContent=k;
+    const td2=document.createElement("td"); td2.style.textAlign="right"; td2.textContent=fmtAmount(acc[k]);
+    tr.appendChild(td1); tr.appendChild(td2); body.appendChild(tr);
+  });
+}
+
+function renderTable(){
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = "";
+  const filtered = applyFilters();
+  renderSummary(filtered);
+
+  filtered.forEach(r => {
+    const unit   = MAP.unit>=0 ? (r[MAP.unit]||"") : "";
+    const name   = MAP.name>=0 ? (r[MAP.name]||"") : "";
+    const amount = MAP.amount>=0 ? (r[MAP.amount]||"") : "";
+    const fund   = MAP.fund>=0 ? (r[MAP.fund]||"") : "";
+    const status = MAP.status>=0 ? (r[MAP.status]||"") : "";
+    const note   = MAP.note>=0 ? (r[MAP.note]||"") : "";
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(unit)}</td>
+      <td>${escapeHtml(name)}</td>
+      <td class="th-right">${fmtAmount(amount)}</td>
+      <td>${escapeHtml(fund)}</td>
+      <td><span class="status-badge ${statusClass(status)}">${escapeHtml(status)}</span></td>
+      <td><button class="btn btn-sm">รายละเอียด</button></td>
+    `;
+    tr.querySelector("button").addEventListener("click", () => openNote(name, note));
+    tr.querySelector(".status-badge").addEventListener("click", () => openNote(name, note));
+    tbody.appendChild(tr);
+  });
+}
+
+/* ===== Modal ===== */
+function openNote(title, text){
+  document.getElementById("modalTitle").textContent = "รายละเอียดอยู่ในขั้นตอน — " + (title || "");
+  document.getElementById("modalBody").textContent  = text || "— ไม่มีหมายเหตุ —";
+  document.getElementById("modal").style.display = "flex";
+}
+
+/* ===== Fetch & Auto-Refresh ===== */
+async function fetchAndRender(){
+  const err = document.getElementById("errBox");
+  err.style.display = "none";
+  try {
+    const url = GSHEET_CSV_URL + (GSHEET_CSV_URL.includes("?") ? "&" : "?") + "_ts=" + Date.now(); // กันแคช
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const text = await res.text();
+    const grid = parseCSV(text);
+    if (!grid.length) throw new Error("CSV ว่าง");
+
+    HEADER = grid[0].map(h => (h||"").trim());
+    ROWS   = grid.slice(1).filter(r => r.some(x => (x||"").toString().trim()!==""));
+    MAP    = autoMap(HEADER);
+
+    if (MAP.name<0 || MAP.amount<0 || MAP.status<0) {
+      err.textContent = "เตือน: บางหัวคอลัมน์หาไม่เจอ (ชื่อโครงการ/จำนวน/อยู่ในขั้นตอน) — กรุณาตรวจชื่อหัวคอลัมน์ให้ตรง";
+      err.style.display = "block";
+    }
+
+    fillUnitFilter();
+    renderTable();
+  } catch(e){
+    err.textContent = "ไม่สามารถดึงข้อมูลได้: " + e.message;
+    err.style.display = "block";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("refreshSec").textContent = REFRESH_SECONDS;
+  document.getElementById("btnRefresh").addEventListener("click", fetchAndRender);
+  document.getElementById("unitFilter").addEventListener("change", renderTable);
+  document.getElementById("searchInput").addEventListener("input", renderTable);
+
+  const m = document.getElementById("modal");
+  document.getElementById("closeModal").addEventListener("click", () => m.style.display = "none");
+  m.addEventListener("click", (e) => { if (e.target.id === "modal") m.style.display = "none"; });
+
+  fetchAndRender();
+  setInterval(fetchAndRender, REFRESH_SECONDS * 1000);
+});
+</script>
+</body>
+</html>
