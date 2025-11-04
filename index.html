@@ -20,7 +20,7 @@
   .th-right { text-align:right; }
   .status-badge { display:inline-block; border-radius:8px; padding:4px 8px; font-weight:700; }
   .bg-green { background:#3FBF7F; color:#073b2f; }    /* ผูก PO แล้ว */
-  .bg-orange { background:#FFA94D; color:#5a2d00; }   /* ทำสัญญาแล้ว / กำลังทำสัญญา */
+  .bg-orange { background:#FFA94D; color:#5a2d00; }   /* กำลังทำสัญญา / ทำสัญญาแล้ว / รอทำสัญญา */
   .bg-default { background:#E8F2FF; color:#123d7e; }  /* อื่น ๆ */
   .error { background:#fff1f0; color:#a8071a; border:1px solid #ffccc7; padding:8px 10px; border-radius:8px; margin-bottom:8px; display:none; }
 
@@ -117,7 +117,21 @@ function norm(s){ return (s||"").toString().replace(/\s+/g,"").toLowerCase(); }
 function escapeHtml(s) { return (s||"").toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 function fmtAmount(x) { const n = Number((x||"").toString().replace(/,/g,"").trim()); return isNaN(n) ? "" : n.toLocaleString('th-TH', { maximumFractionDigits: 0 }); }
 function parseAmount(x){ const n = Number((x||"").toString().replace(/,/g,"").trim()); return isNaN(n) ? 0 : n; }
-function statusClass(s){ s=(s||"").trim(); if(s==="ผูก PO แล้ว") return "bg-green"; if(s==="ทำสัญญาแล้ว"||s==="กำลังทำสัญญา") return "bg-orange"; return "bg-default"; }
+
+/* ✅ ปรับให้ยืดหยุ่นเรื่องสถานะและสี */
+function statusClass(s){
+  const t = norm(s);
+
+  // เขียว: "ผูก PO แล้ว" (เผื่อพิมพ์ต่างรูปแบบ/มีเว้นวรรค/ตัวพิมพ์)
+  if (t.includes("ผูก") && t.includes("po")) return "bg-green";
+
+  // ส้ม: "กำลังทำสัญญา" / "ทำสัญญาแล้ว" / "รอทำสัญญา"
+  const orangeKeys = ["กำลังทำสัญญา","ทำสัญญาแล้ว","รอทำสัญญา"].map(norm);
+  if (orangeKeys.some(k => t.includes(k))) return "bg-orange";
+
+  // อื่น ๆ
+  return "bg-default";
+}
 
 /* ===== Header mapping แบบยืดหยุ่น ===== */
 function autoMap(headers){
